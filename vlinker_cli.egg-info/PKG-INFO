@@ -1,0 +1,102 @@
+Metadata-Version: 2.4
+Name: vlinker-cli
+Version: 0.1.0
+Summary: VCDS-like CLI tooling for vLinker adapters
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pyserial
+Requires-Dist: python-can
+Requires-Dist: click
+
+vLinker CLI prototype
+
+Small prototype to detect a VGate vLinker USB device on Linux and provide simple commands.
+
+Commands
+- `list` : list /dev/serial/by-id and raw tty devices
+- `info <path>` : show resolved path for a by-id link
+- `detect` : print the most likely device path (by-id preferred)
+
+Next steps: add `pyserial` based communication, implement CAN/UDS/KWP frames, and a CLI/GUI for diagnostics.
+
+Getting started
+--------------
+
+1. Install dependencies (recommended inside a virtualenv):
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+2. Install udev rule and link CLI (from repo root):
+
+```bash
+sudo ./scripts/install.sh
+```
+
+Usage examples
+--------------
+
+- List devices:
+
+```bash
+python3 vlinker_cli.py list
+```
+
+- Scan ECUs and read DTCs (ELM/OBD mode):
+
+```bash
+python3 vlinker_cli.py diag scan /dev/ttyUSB0 --mode elm
+python3 vlinker_cli.py diag read-dtc /dev/ttyUSB0
+```
+
+- Attach an slcan interface (requires slcand in PATH and sudo):
+
+```bash
+python3 vlinker_cli.py can attach-slcan /dev/ttyUSB0 --iface can0 --bitrate 500000
+```
+
+Advanced features
+-----------------
+
+This prototype includes:
+- Serial communication helpers (`vlinker/serial_comm.py`)
+- Diagnostic helpers for ELM-like adapters and basic OBD/UDS flows (`vlinker/diag.py`)
+- Protocol parsing helpers (`vlinker/protocols.py`)
+- VW long-coding helpers (`vlinker/vw_helpers.py`)
+- Advanced UDS scaffolding and seed/key orchestration (`vlinker/advanced.py`, `vlinker/ecu_profiles.py`)
+
+Safety and testing notes
+------------------------
+
+- This tool is a prototype and may send commands that can modify vehicle state. Always test on a non-critical vehicle and ensure you have a backup and knowledge of the procedures.
+- Coding/adaptation and security access flows require vehicle-specific knowledge and testing. The provided ECU profiles are placeholders and must be replaced with verified algorithms before use in production.
+
+Safe coding notes
+-----------------
+
+- The CLI supports a `--dry-run` mode for coding writes which prepares the UDS payload and prints it without sending it to the vehicle. Use this to verify the payload before applying changes.
+- To actually perform a coding write you must pass `--force` explicitly to avoid accidental writes.
+- Example (dry-run):
+
+```bash
+cat coding.bin | python3 vlinker_cli.py adv coding /dev/ttyUSB0 --hex F190 --dry-run
+```
+
+Example (apply with explicit force):
+
+```bash
+cat coding.bin | python3 vlinker_cli.py adv coding /dev/ttyUSB0 --hex F190 --force
+```
+
+Packaging
+---------
+
+To build a single-file executable (requires `pyinstaller`):
+
+```bash
+./scripts/build.sh
+```
+
+If you have questions or want me to prioritize a specific VW/Audi model/year for coding/security algorithms, tell me which vehicle and I will focus next.
+

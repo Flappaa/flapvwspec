@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlinker-cli"
+version = "0.1.0"
+description = "VCDS-like CLI tooling for vLinker adapters"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["pyserial", "python-can", "click"]
+optional-dependencies = { web = ["fastapi", "uvicorn[standard]"] }
+
+[project.scripts]
+vlinker = "vlinker.entrypoints:main"
+vlinker-profile-interactive = "vlinker.entrypoints:profile_interactive_main"
+
+[tool.setuptools.packages.find]
+include = ["vlinker*"]

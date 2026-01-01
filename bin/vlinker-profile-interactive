@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Run interactive profile builder from the command line.
+
+Usage: vlinker-profile-interactive [capture_file]
+If no capture_file is provided, the script will prompt for one.
+"""
+import sys
+from pathlib import Path
+
+try:
+    from vlinker.profile_builder import interactive_build
+except Exception as e:
+    print('Failed to import vlinker.profile_builder:', e)
+    sys.exit(2)
+
+def main():
+    cap = None
+    if len(sys.argv) > 1:
+        cap = sys.argv[1]
+    else:
+        cap = input('Path to capture file (or Enter to cancel): ').strip()
+        if not cap:
+            print('No capture provided; aborting')
+            return
+    p = Path(cap)
+    if not p.exists():
+        print('Capture file not found:', cap)
+        return
+    interactive_build(str(p))
+
+if __name__ == '__main__':
+    main()
