@@ -17,40 +17,39 @@ def _hexstr_to_bytes(s: str) -> bytes:
     return binascii.unhexlify(s2)
 
 
-def _parse_flow_control(buf: bytes):
-    """Parse a Flow Control (FC) frame from a buffer.
+def _stmin_to_seconds(s: int) -> float:
+    """Convert ISO-TP stMin value to seconds.
 
-    Returns tuple (flow_status, block_size, st_min, consumed_bytes) or None if not present.
+    0x00-0x7F -> milliseconds
+    0xF1-0xF9 -> (n-0xF0)*100 microseconds
     """
-    if not buf:
-        return None
-    # FC PCI nibble is 0x3
-    first = buf[0]
-    if (first >> 4) != 3:
-        return None
-    flow_status = first & 0x0F
-    block_size = buf[1] if len(buf) > 1 else 0
-    st_min = buf[2] if len(buf) > 2 else 0
-    consumed = 1 + (1 if len(buf) > 1 else 0) + (1 if len(buf) > 2 else 0)
-    return (flow_status, block_size, st_min, consumed)
+    if not s:
+        return 0.0
+    if 0xF1 <= s <= 0xF9:
+        usec = (s - 0xF0) * 100
+        return usec / 1_000_000.0
+    return s / 1000.0
 
 
 def _parse_flow_control(buf: bytes):
-    """Parse a Flow Control (FC) frame from a buffer.
+    """Locate and parse a Flow Control (FC) frame from a buffer.
 
-    Returns tuple (flow_status, block_size, st_min, consumed_bytes) or None if not present.
+    Scans the buffer for a byte with PCI nibble 0x3 and returns
+    (flow_status, block_size, st_min, consumed_bytes_from_start) or None.
     """
     if not buf:
         return None
-    # FC PCI nibble is 0x3
-    first = buf[0]
-    if (first >> 4) != 3:
-        return None
-    flow_status = first & 0x0F
-    block_size = buf[1] if len(buf) > 1 else 0
-    st_min = buf[2] if len(buf) > 2 else 0
-    consumed = 1 + (1 if len(buf) > 1 else 0) + (1 if len(buf) > 2 else 0)
-    return (flow_status, block_size, st_min, consumed)
+    # scan buffer for any FC start
+    for i in range(len(buf)):
+        first = buf[i]
+        if (first >> 4) != 3:
+            continue
+        flow_status = first & 0x0F
+        block_size = buf[i+1] if i+1 < len(buf) else 0
+        st_min = buf[i+2] if i+2 < len(buf) else 0
+        consumed = (i + 1 + (1 if i+1 < len(buf) else 0) + (1 if i+2 < len(buf) else 0))
+        return (flow_status, block_size, st_min, consumed)
+    return None
 
 
 def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: float = 3.0) -> bytes:
@@ -72,11 +71,41 @@ def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: floa
     def _read_response(sc: SerialComm, timeout: float) -> bytes:
         start = time.time()
         buf = bytearray()
-        # read initial data
+        # read initial data, but skip any leading Flow Control (FC) frames
         first = sc.read_all()
         if not first:
             return b''
         buf.extend(first)
+        # scan buffer for the first non-FC frame start.
+        # Flow Control frames are 3-byte units: PCI(0x3_), blockSize, stMin.
+        def _locate_first_non_fc(barr: bytearray):
+            i = 0
+            L = len(barr)
+            while i < L:
+                b = barr[i]
+                if ((b >> 4) & 0x0F) == 3:
+                    # if we have a full FC (3 bytes) skip it, otherwise indicate we need more
+                    if i + 2 < L:
+                        i += 3
+                        continue
+                    else:
+                        return None  # incomplete FC at end -> need more data
+                # found non-FC start
+                return i
+            return None
+
+        first_non_fc_index = _locate_first_non_fc(buf)
+        while first_non_fc_index is None and time.time() - start < timeout:
+            more = sc.read_all()
+            if more:
+                buf.extend(more)
+                first_non_fc_index = _locate_first_non_fc(buf)
+            else:
+                time.sleep(0.005)
+        if first_non_fc_index is None:
+            return b''
+        if first_non_fc_index:
+            buf = bytearray(buf[first_non_fc_index:])
         pci = buf[0]
         frame_type = (pci >> 4) & 0x0F
         # Single Frame
@@ -163,6 +192,41 @@ def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: floa
         if not fc_parsed:
             raise RuntimeError('no flow control response')
         flow_status, block_size, st_min, _consumed = fc_parsed
+        # consume parsed FC bytes so subsequent parses find newer FCs
+        if _consumed:
+            try:
+                del fc_buf[:_consumed]
+            except Exception:
+                fc_buf = bytearray()
+
+        # handle immediate FC meanings before sending CFs
+        if flow_status == 2:
+            raise RuntimeError('responder overflow / abort')
+        if flow_status == 1:
+            # initial WAIT: honor st_min and wait for CTS up to retry limit
+            wait_attempts = 0
+            max_wait_attempts = 5
+            while flow_status == 1 and wait_attempts < max_wait_attempts:
+                wait_attempts += 1
+                wait_secs = _stmin_to_seconds(st_min) or 0.05
+                time.sleep(wait_secs)
+                # read further FCs (accumulate into fc_buf)
+                more = sc.read_all()
+                if more:
+                    fc_buf.extend(more)
+                    fc_parsed = _parse_flow_control(bytes(fc_buf))
+                    if fc_parsed:
+                        flow_status, block_size, st_min, _consumed = fc_parsed
+                        if _consumed:
+                            try:
+                                del fc_buf[:_consumed]
+                            except Exception:
+                                fc_buf = bytearray()
+                        break
+            if flow_status == 1:
+                raise RuntimeError('responder WAIT exceeded retries')
+
+        # use module-level `_stmin_to_seconds` helper
 
         # send consecutive frames honoring block_size (BS) and st_min
         offset = 6
@@ -174,18 +238,6 @@ def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: floa
             sc.send_bytes(cf_payload)
 
         cf_payload_space = 7
-        # helper to convert st_min value to seconds (ISO-TP):
-        # 0x00-0x7F -> milliseconds; 0xF1-0xF9 -> (n-0xF0)*100 microseconds
-        def _stmin_to_seconds(s):
-            if not s:
-                return 0.0
-            if 0xF1 <= s <= 0xF9:
-                # microseconds units
-                usec = (s - 0xF0) * 100
-                return usec / 1_000_000.0
-            # else treat as milliseconds
-            return s / 1000.0
-
         st_seconds = _stmin_to_seconds(st_min)
 
         # when block_size == 0 -> sender may send all CFs without waiting for more FC
@@ -203,6 +255,9 @@ def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: floa
                 # respect minimum separation time
                 if st_seconds:
                     time.sleep(st_seconds)
+            # if we've finished sending all data, exit without waiting for another FC
+            if offset >= total_len:
+                break
             # if sender used BS==0, loop will keep sending until all done
             if block_size == 0:
                 continue
@@ -239,4 +294,8 @@ def send_iso_tp(device: str, payload_hex: str, baud: int = 115200, timeout: floa
         resp = _read_response(sc, timeout)
         return resp
     finally:
-        sc.close()
+        if hasattr(sc, 'close'):
+            try:
+                sc.close()
+            except Exception:
+                pass
