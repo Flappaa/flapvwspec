@@ -1,67 +1,13 @@
-# vlinker-cli
+Metadata-Version: 2.4
+Name: vlinker-cli
+Version: 0.1.0
+Summary: VCDS-like CLI tooling for vLinker adapters
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pyserial
+Requires-Dist: python-can
+Requires-Dist: click
 
-Lightweight VCDS-like CLI + web UI for VGate vLinker (Kali-friendly).
-
-**Quick Start**
-- Create a Python virtualenv and activate:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-- Install runtime deps:
-
-```bash
-pip install -r requirements.txt
-```
-
-- Run the web UI (FastAPI / Uvicorn):
-
-```bash
-uvicorn vlinker.webapp.main_safe:app --host 127.0.0.1 --port 8000
-```
-
-Open http://127.0.0.1:8000 in a browser. The UI supports simulator mode.
-
-**Running against hardware**
-- Connect your vLinker adapter (example: `/dev/ttyUSB0`). Use the API or UI to `Connect`.
-- Non-destructive smoke test:
-
-```bash
-. .venv/bin/activate
-bash scripts/hw_smoke.sh
-```
-
-Set `CLEAR=true` to enable DTC clear (destructive) only when you are sure.
-
-**Tests & Development**
-- Install dev deps:
-
-```bash
-pip install -r requirements-dev.txt
-```
-- Run tests:
-
-```bash
-pytest -q
-```
-
-Included tests cover simulator endpoints, ISO‑TP helpers, and manager/diag API behavior.
-
-**CI**
-- A GitHub Actions workflow is provided at `.github/workflows/ci.yml` to run tests on push/PR.
-
-**Useful scripts**
-- `scripts/hw_smoke.sh` — non-destructive hardware smoke test
-- `scripts/run_diag_api_sim.py` — quick simulator API exerciser
-- `scripts/run_iso_tp_edge.py`, `scripts/run_iso_tp_stress.py` — iso-tp tests
-
-**Next steps / recommendations**
-- Add coverage reporting and include `requirements-dev.txt` in CI.
-- Harden ISO‑TP handling further (OVERFLOW, stMin edge cases) and expand stress variants.
-
-If you want, I can commit these changes and push a branch, or add coverage and CI badges.
 vLinker CLI prototype
 
 Small prototype to detect a VGate vLinker USB device on Linux and provide simple commands.

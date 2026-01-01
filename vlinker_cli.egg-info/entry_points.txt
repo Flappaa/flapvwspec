@@ -1,0 +1,3 @@
+[console_scripts]
+vlinker = vlinker.entrypoints:main
+vlinker-profile-interactive = vlinker.entrypoints:profile_interactive_main
